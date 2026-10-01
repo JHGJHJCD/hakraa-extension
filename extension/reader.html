@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>הקראה</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔊</text></svg>">
+<!-- גרסה עצמאית של "הקראה": קובץ אחד, בלי שרת. נבנה ע"י build_standalone.py — לא לערוך את הקובץ הבנוי. -->
+<style>
+  :root{--bg:#f6f4ef;--card:#fff;--ink:#1f2328;--muted:#6b7280;--accent:#2f6f5e;--accent-2:#e7f1ed;--line:#e5e1d8;--hl:#fff1b8}
+  @media (prefers-color-scheme:dark){:root{--bg:#16181b;--card:#1f2226;--ink:#e8e6e1;--muted:#9aa0a6;--accent:#6fbfa6;--accent-2:#23332e;--line:#2e3237;--hl:#4a4220}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Segoe UI",Arial,sans-serif;font-size:18px}
+  .wrap{max-width:900px;margin:0 auto;padding:16px}
+  h1{font-size:22px;margin:4px 0 12px;display:flex;align-items:center;gap:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  textarea{width:100%;min-height:180px;resize:vertical;border:1px solid var(--line);border-radius:10px;padding:12px;font:inherit;background:transparent;color:inherit;line-height:1.6}
+  .bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:12px}
+  button{font:inherit;font-size:17px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:10px;padding:10px 16px;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+  @media (prefers-color-scheme:dark){button.primary{color:#0e1512}}
+  button:disabled{opacity:.45;cursor:default}
+  .ctl{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:15px}
+  select,input[type=range]{font:inherit;font-size:15px}
+  select{padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+  #reader{margin-top:14px;line-height:1.9;font-size:20px;max-height:55vh;overflow:auto;display:none}
+  #reader span{cursor:pointer;border-radius:4px;padding:1px 0;transition:background .15s}
+  #reader span:hover{background:var(--accent-2)}
+  #reader span.done{color:var(--muted)}
+  #reader span.cur{background:var(--hl)}
+  #status{margin-top:10px;color:var(--muted);font-size:15px;min-height:1.4em}
+  .progress{height:6px;background:var(--line);border-radius:3px;margin-top:10px;overflow:hidden}
+  .progress>div{height:100%;width:0;background:var(--accent);transition:width .3s}
+  .hint{color:var(--muted);font-size:14px;margin-top:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🔊 הקראה</h1>
+  <div class="card">
+    <div id="editBox">
+      <textarea id="txt" placeholder="הדבק כאן טקסט — או סמן טקסט בכל אתר ולחץ על כפתור התוסף…"></textarea>
+    </div>
+    <div id="reader"></div>
+    <div class="bar">
+      <button class="primary" id="btnPaste">📋 הדבק והקרא</button>
+      <button id="btnPlay">▶ הקרא</button>
+      <button id="btnPrev" title="קטע קודם">⏮</button>
+      <button id="btnNext" title="קטע הבא">⏭</button>
+      <button id="btnStop">⏹ עצור</button>
+      <button id="btnEdit">✎ ערוך טקסט</button>
+    </div>
+    <div class="bar">
+      <label class="ctl">קול
+        <select id="voice">
+          <optgroup label="גוגל — קול טבעי">
+            <option value="gf">אישה — חמה</option>
+            <option value="gf2">אישה — קלילה</option>
+            <option value="gm">גבר — ידידותי</option>
+            <option value="gm2">גבר — רציני</option>
+          </optgroup>
+          <optgroup label="קול המחשב — בלי הגבלה">
+            <option value="f">אישה</option>
+            <option value="m">גבר</option>
+          </optgroup>
+        </select>
+      </label>
+      <label class="ctl">מהירות
+        <input type="range" id="rate" min="-30" max="100" step="5" value="0">
+        <span id="rateLbl">×1.0</span>
+      </label>
+    </div>
+    <div class="progress"><div id="prog"></div></div>
+    <div id="status"></div>
+    <div id="note" class="hint" style="color:#b45309"></div>
+    <div class="hint">רווח = השהה/המשך · חיצים = קטע קודם/הבא · אפשר ללחוץ על כל קטע כדי לקפוץ אליו</div>
+    <!-- רק בתוסף הדפדפן: הגדרת מפתח גוגל אישי -->
+    <div id="keyBox" class="hint" style="display:none">
+      <button id="keyToggle" style="font-size:14px;padding:4px 10px">⚙ מפתח גוגל</button>
+      <span id="keyState"></span>
+      <div id="keyForm" style="display:none;margin-top:8px">
+        <input id="keyInput" type="password" dir="ltr" placeholder="Gemini API key" style="font:inherit;font-size:14px;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--card);color:var(--ink);width:100%;max-width:340px">
+        <button id="keySave" style="font-size:14px;padding:4px 10px">שמור</button>
+        <div style="margin-top:6px">מפתח חינמי מקבלים ב-<a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a>. בלי מפתח ההקראה היא בקול המחשב.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="key.js"></script>
+<script src="reader.js"></script>
+</body>
+</html>
