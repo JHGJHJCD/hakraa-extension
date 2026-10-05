@@ -1,17 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "הקראה – קורא טקסט בקול טבעי",
+  "name": "__MSG_extName__",
   "short_name": "הקראה",
-  "version": "1.0.0",
-  "description": "מסמנים טקסט בכל אתר, לוחצים – והוא מוקרא בעברית בקול אנושי וטבעי. אפשר גם להקריא דף שלם או להדביק מאמר.",
+  "version": "1.0.3",
+  "description": "__MSG_extDesc__",
+  "default_locale": "he",
   "minimum_chrome_version": "116",
-  "icons": {"16": "icon16.png", "48": "icon48.png", "128": "icon128.png"},
-  "action": {"default_title": "הקראה – סמן טקסט ולחץ כאן", "default_icon": {"16": "icon16.png", "48": "icon48.png"}},
+  "icons": {"16": "icon16.png", "32": "icon32.png", "48": "icon48.png", "128": "icon128.png"},
+  "action": {"default_title": "__MSG_actionTitle__", "default_icon": {"16": "icon16.png", "32": "icon32.png", "48": "icon48.png"}},
   "background": {"service_worker": "background.js"},
   "side_panel": {"default_path": "reader.html"},
   "permissions": ["contextMenus", "sidePanel", "storage", "activeTab", "scripting"],
-  "host_permissions": ["https://generativelanguage.googleapis.com/*"],
   "commands": {
-    "_execute_action": {"suggested_key": {"default": "Alt+Shift+K"}, "description": "הקרא את הטקסט המסומן"}
+    "_execute_action": {"suggested_key": {"default": "Alt+Shift+K"}, "description": "__MSG_cmdDesc__"}
   }
 }

@@ -1,0 +1,6 @@
+{
+  "extName": {"message": "Hakraa – Read Text Aloud in a Natural Voice"},
+  "extDesc": {"message": "Select text on any website and hear it read aloud in a natural, human-sounding Hebrew voice. Read a whole page or paste an article."},
+  "actionTitle": {"message": "Hakraa – select text and click here"},
+  "cmdDesc": {"message": "Read the selected text aloud"}
+}

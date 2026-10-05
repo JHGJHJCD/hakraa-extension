@@ -22,16 +22,18 @@ async function grab(tab, frameId, whole){
     return (r && r.result) || "";
   } catch (e) { return ""; }
 }
-async function send(text){
-  if (text && text.trim()) await chrome.storage.session.set({pending: {text, t: Date.now()}});
+async function send(text, win){
+  if (text && text.trim()) await chrome.storage.session.set({pending: {text, t: Date.now(), win}});
 }
 
 // sidePanel.open חייב להיקרא מיד בתוך הלחיצה, לפני כל await
 chrome.contextMenus.onClicked.addListener((info, tab) => {
+  // לחיצה בתוך החלונית עצמה (או בדף בלי לשונית) — אין לשונית; מקריאים את מה שהדפדפן מסר
+  if (!tab || tab.windowId == null) { send(info.selectionText || "", null); return; }
   chrome.sidePanel.open({windowId: tab.windowId}).catch(() => {});
-  grab(tab, info.frameId, info.menuItemId === MENU_PAGE).then(t => send(t || info.selectionText || ""));
+  grab(tab, info.frameId, info.menuItemId === MENU_PAGE).then(t => send(t || info.selectionText || "", tab.windowId));
 });
 chrome.action.onClicked.addListener(tab => {
   chrome.sidePanel.open({windowId: tab.windowId}).catch(() => {});
-  grab(tab, 0, false).then(send);
+  grab(tab, 0, false).then(t => send(t, tab.windowId));
 });

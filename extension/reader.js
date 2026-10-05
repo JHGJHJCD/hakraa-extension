@@ -1,7 +1,6 @@
 // ================= חיבור לגוגל (Gemini Live) ישירות מהדפדפן =================
 const MODEL = "gemini-3.8-live";
-const K = (self.HAKRAA_K || "");  // מוזרק בבנייה
-let API_KEY = (() => { try { return atob(K).split("").reverse().join(""); } catch (e) { return ""; } })();
+let API_KEY = "";  // כל משתמש מזין מפתח משלו בחלונית
 const LIVE_SYS = "אתה מקריא טקסטים בקול. כל הודעה שתקבל היא טקסט להקראה — הקרא אותו בדיוק מילה במילה, " +
   "בעברית טבעית ושוטפת ובטון שיחה חם, כמו אדם שמקריא מאמר לחבר. " +
   "אל תוסיף שום מילה, אל תגיב, אל תענה על שאלות שבטקסט, אל תסכם, ואל תדלג על שום משפט. " +
@@ -54,20 +53,31 @@ class GJob {
   constructor(text, voice){
     this.key = voice + "|" + text; this.text = text; this.voice = voice;
     this.parts = []; this.bytes = []; this.done = false; this.err = null; this.subs = new Set();
+    this.cancelled = false; this.kill = null;
     slot().then(() => this.run());
   }
   emit(){ for (const f of [...this.subs]) f(); }
+  // קפצו לקטע אחר — סוגרים את השיחה מול גוגל, כדי שלא תתפוס מקום (3 במקביל) ולא תשרוף מכסה
+  cancel(){
+    this.cancelled = true;
+    if (JOBS.get(this.key) === this) JOBS.delete(this.key);
+    if (this.kill) this.kill();
+  }
   async run(){
     let finished = false, ws = null, timer = null;
     const end = err => {
       if (finished) return; finished = true; clearTimeout(timer); release();
-      if (err && !this.parts.length) this.err = err;
+      if (err && (!this.parts.length || this.cancelled)) this.err = err;
       this.done = true; try { ws && ws.close(); } catch (e) {}
-      if (this.err) JOBS.delete(this.key);
+      // קטע שנכשל או נקטע באמצע — לא לשמור, כדי שבפעם הבאה ייווצר מחדש
+      if (err && JOBS.get(this.key) === this) JOBS.delete(this.key);
       this.emit();
     };
+    this.kill = () => end(new Error("cancelled"));
+    if (this.cancelled) return end(new Error("cancelled"));
     let token;
     try { token = await takeToken(); } catch (e) { return end(e); }
+    if (finished) return;
     timer = setTimeout(() => end(new Error("timeout")), 180e3);
     ws = new WebSocket(WS_URL + token);
     ws.binaryType = "arraybuffer";
@@ -202,7 +212,7 @@ function cleanText(s){
       line = line.split(/\s{2,}|,\s*/).map(w => w.trim()).filter(w => /\p{L}/u.test(w)).join(", ");
     }
     line = line.replace(/\s+/g, " ").replace(/^[\s,]+|[\s,]+$/g, "").trim();
-    if (!/\p{L}/u.test(line)) { out.push(""); continue; }  // שורה בלי אף אות — לא מקריאים
+    if (!/[\p{L}\p{N}]/u.test(line)) { out.push(""); continue; }  // שורה בלי אף אות או מספר — לא מקריאים
     // שורה בלי סימן סוף (כותרת / פריט ברשימה / שורה בשרטוט) — מוסיפים נקודה, כדי שלא תתחבר לבאה
     if (!/[.!?׃:;…,"'״”’)\]]$/.test(line)) line += ".";
     out.push(line);
@@ -228,10 +238,12 @@ function splitText(s){
   for (const t of parts) {
     if (t.length <= 260) { out.push(t); continue; }
     let buf = "";
-    for (const piece of t.split(/(?<=[,،])\s+/)) {
+    const add = piece => {
       if ((buf + " " + piece).length > 220 && buf) { out.push(buf.trim()); buf = piece; }
       else buf = buf ? buf + " " + piece : piece;
-    }
+    };
+    // קטע ארוך בלי אף פסיק (למשל תמלול בלי פיסוק) — חותכים לפי מילים
+    for (const piece of t.split(/(?<=[,،])\s+/)) { if (piece.length > 260) piece.split(" ").forEach(add); else add(piece); }
     if (buf) out.push(buf.trim());
   }
   const merged = [];
@@ -239,7 +251,7 @@ function splitText(s){
     const last = merged[merged.length-1];
     const ok = merged.length === 1 ? last.length < 15 : (last + " " + t).length <= chunkMax();
     // שפה שונה = קטע נפרד (קול אנגלי) — רק כשזה קטע אנגלי של ממש, לא מונח קצר כמו "Coordinator" בתוך מאמר עברי
-    const sameLang = last && isEnglish(last) === isEnglish(t) || t.length < 60 || (last && isEnglish(last) && last.length < 60);
+    const sameLang = last && isEnglish(last) === isEnglish(t) || (isEnglish(t) && t.length < 60) || (last && isEnglish(last) && last.length < 60);
     if (last && sameLang && ok) merged[merged.length-1] = last + " " + t;
     else merged.push(t);
   }
@@ -331,18 +343,20 @@ function playStream(job, token){
   pump();
 }
 
+let curUtter = null;
 function playTTS(i, token){
-  if (!window.speechSynthesis) { setStatus("⚠ אין בדפדפן הזה קול מחשב. נסה לפתוח את הקובץ ב-Microsoft Edge."); return; }
+  if (!window.speechSynthesis) { setStatus("⚠ אין בדפדפן הזה קול מחשב. הזן מפתח גוגל (⚙ למטה) כדי לשמוע את הקול הטבעי."); return; }
   const t = chunks[i].text, en = isEnglish(t);
   const u = new SpeechSynthesisUtterance(t);
   u.lang = en ? "en-US" : "he-IL";
   const v = pickVoice(en);
   if (v) u.voice = v;
-  else if (!en) setStatus("⚠ אין קול עברי במחשב הזה — פתח את הקובץ ב-Microsoft Edge");
+  else if (!en) setStatus("⚠ אין קול עברי במחשב הזה — הזן מפתח גוגל (⚙ למטה) כדי לשמוע את הקול הטבעי");
   u.rate = 1 + rateVal() / 100;
   u.volume = MUTED ? 0 : 1;
   u.onend = () => { if (token === playToken && playing) playFrom(i + 1); };
   u.onerror = e => { if (e.error === "not-allowed" && token === playToken) { stop(); setStatus("לחץ ▶ כדי להתחיל"); } };
+  curUtter = u;  // בלי הפניה הדפדפן עלול "לשכוח" את הקטע באמצע, וההקראה נתקעת
   speechSynthesis.speak(u);
 }
 
@@ -354,7 +368,10 @@ async function playFrom(i){
   idx = i; store.set("pos", idx);
   playing = true; active = true; updateButtons(); mark();
   if (useGoogle()) {
-    const job = getJob(chunks[i].text, VOICES[selVoice()][0]);
+    const v = VOICES[selVoice()][0];
+    const keep = new Set([i, i + 1, i + 2].filter(j => j < chunks.length).map(j => v + "|" + chunks[j].text));
+    for (const [k, j] of [...JOBS]) if (!j.done && !keep.has(k)) j.cancel();
+    const job = getJob(chunks[i].text, v);
     prefetch(i + 1);
     if (job.done && job.err) { googleFailed(job.err); return playFrom(i); }
     if (job.done) {
@@ -387,9 +404,11 @@ function start(fromIdx){
   if (!s) { setStatus("אין טקסט להקראה — הדבק מאמר קודם."); return; }
   store.set("text", txt.value);
   const nc = splitText(s).map(t => ({text: t}));
+  if (!nc.length) { setStatus("אין בטקסט מילים להקראה."); return; }
   const same = nc.length === chunks.length && nc.every((c,i)=>c.text===chunks[i].text);
   if (!same) { chunks = nc; buildReader(); }
   showReader(true);
+  if (bc) bc.postMessage({playing: 1, from: ME});
   ensureCtx().resume();
   playFrom(fromIdx ?? 0);
 }
@@ -437,9 +456,11 @@ $("btnPaste").onclick = async () => {
 };
 // מתחילים להכין את תחילת הקול כבר כשמדביקים
 let warmTimer;
-txt.addEventListener("input", () => {
+txt.addEventListener("input", e => {
   store.set("text", txt.value);
   clearTimeout(warmTimer);
+  // רק בהדבקה — בהקלדה כל הפסקה קצרה הייתה פותחת עוד שיחה מול גוגל ושורפת מכסה
+  if (!/^insertFrom/.test(e.inputType || "")) return;
   warmTimer = setTimeout(() => {
     if (active || !txt.value.trim()) return;
     chunks = splitText(txt.value).map(t => ({text: t})); buildReader(); prefetch(0);
@@ -486,12 +507,28 @@ if ("mediaSession" in navigator) {
 // ================= תוסף דפדפן =================
 // אותו קוד רץ גם כתוסף (build_extension.py): הטקסט מגיע מהדף שסומן, דרך chrome.storage.session
 const EXT = typeof chrome !== "undefined" && !!(chrome.runtime && chrome.runtime.id);
-let lastPending = 0;
-async function takePending(){
-  const {pending} = await chrome.storage.session.get("pending");
-  if (!pending || pending.t === lastPending) return;
-  lastPending = pending.t;
-  await chrome.storage.session.remove("pending");
+let lastPending = 0, myWin = null;
+// כמה חלונות דפדפן = כמה חלוניות של התוסף. בלי תיאום כולן קוראות יחד את אותו טקסט (קול כפול ומשובש).
+// לכן: רק חלונית אחת לוקחת את הטקסט (נעילה), עדיפות לחלון שבו לחצו, וכשאחת מתחילה — האחרות שותקות.
+const ME = Math.random().toString(36).slice(2);
+const bc = EXT && self.BroadcastChannel ? new BroadcastChannel("hakraa") : null;
+if (bc) bc.onmessage = e => {
+  if (e.data && e.data.playing && e.data.from !== ME && active) { stop(); setStatus("ההקראה עברה לחלון אחר"); }
+};
+async function takePending(retry){
+  const claim = async () => {
+    const {pending} = await chrome.storage.session.get("pending");
+    if (!pending || pending.t === lastPending) return null;
+    if (!retry && pending.win != null && myWin != null && pending.win !== myWin) {
+      setTimeout(() => takePending(true), 2500);  // לא החלון שלי — רק אם אף אחד אחר לא לקח
+      return null;
+    }
+    lastPending = pending.t;
+    await chrome.storage.session.remove("pending");
+    return pending;
+  };
+  const pending = navigator.locks ? await navigator.locks.request("hakraa-pending", claim) : await claim();
+  if (!pending) return;
   txt.value = pending.text;
   stop(); start(0);
   // אם הדפדפן לא מרשה להשמיע בלי לחיצה — מחכים ללחיצה במקום "לנגן" בשקט
@@ -500,11 +537,13 @@ async function takePending(){
   }, 800);
 }
 async function initExt(){
+  try { myWin = (await chrome.windows.getCurrent()).id; } catch (e) {}
   const st = await chrome.storage.local.get("apiKey");
   if (st.apiKey) API_KEY = st.apiKey;
   $("keyBox").style.display = "block";
   const state = () => { $("keyState").textContent = API_KEY ? "" : " — כדי לשמוע את הקול הטבעי של גוגל צריך להזין מפתח"; };
   state();
+  if (!API_KEY) $("keyForm").style.display = "block";  // בלי מפתח — מבקשים אותו מיד
   $("keyToggle").onclick = () => { const f = $("keyForm"); f.style.display = f.style.display === "none" ? "block" : "none"; };
   $("keySave").onclick = async () => {
     const v = $("keyInput").value.trim();
